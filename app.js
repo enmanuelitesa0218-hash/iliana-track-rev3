@@ -216,18 +216,43 @@ class PCBAMaterialManager {
             console.warn("Firebase SDK no cargado. Funcionando en modo local.");
             return;
         }
-        const configStr = localStorage.getItem('iliana_firebase_config');
-        if (!configStr) return;
+
+        // Credenciales Centralizadas para Iliana Track
+        const firebaseConfig = {
+            apiKey: "AIzaSyCGs6D6TS5owqyeXgpYgnEgpWTMWx2XsZo",
+            authDomain: "jb-dashboard-86c3d.firebaseapp.com",
+            databaseURL: "https://jb-dashboard-86c3d-default-rtdb.firebaseio.com",
+            projectId: "jb-dashboard-86c3d",
+            storageBucket: "jb-dashboard-86c3d.firebasestorage.app",
+            messagingSenderId: "840492917794",
+            appId: "1:840492917794:web:e772b643d3a5e89a09567b"
+        };
 
         try {
-            const config = JSON.parse(configStr);
             if (!firebase.apps.length) {
-                firebase.initializeApp(config);
+                firebase.initializeApp(firebaseConfig);
             }
             this.db = firebase.database();
+            console.log("✅ Firebase Sincronizado para Iliana Track");
+            this.updateSyncStatus(true);
             this.startSync();
         } catch (e) {
             console.error("Firebase Init Error", e);
+            this.updateSyncStatus(false);
+        }
+    }
+
+    updateSyncStatus(online) {
+        const badge = document.getElementById('connection-status');
+        if (!badge) return;
+        if (online) {
+            badge.classList.remove('offline');
+            badge.classList.add('online');
+            badge.querySelector('.status-text').textContent = 'Sincronizado';
+        } else {
+            badge.classList.remove('online');
+            badge.classList.add('offline');
+            badge.querySelector('.status-text').textContent = 'Local';
         }
     }
 
@@ -254,8 +279,11 @@ class PCBAMaterialManager {
     startSync() {
         if (!this.db) return;
         
+        // Base Path para evitar colisiones
+        const basePath = 'iliana_track';
+
         // Sync Materials
-        this.db.ref('materials').on('value', (snapshot) => {
+        this.db.ref(`${basePath}/materials`).on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
                 this.materials = Object.values(data);
@@ -264,7 +292,7 @@ class PCBAMaterialManager {
         });
 
         // Sync Equipment
-        this.db.ref('equipment').on('value', (snapshot) => {
+        this.db.ref(`${basePath}/equipment`).on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
                 this.equipment = Object.values(data);
@@ -273,7 +301,7 @@ class PCBAMaterialManager {
         });
 
         // Sync Tips
-        this.db.ref('tips').on('value', (snapshot) => {
+        this.db.ref(`${basePath}/tips`).on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
                 this.tips = Object.values(data);
@@ -285,17 +313,19 @@ class PCBAMaterialManager {
     async uploadToFirebase() {
         if (!this.db) return;
         
+        const basePath = 'iliana_track';
+        
         const materialsData = {};
         this.materials.forEach(m => materialsData[m.partNumber.replace(/[.#$/[\]]/g, '_')] = m);
-        await this.db.ref('materials').set(materialsData);
+        await this.db.ref(`${basePath}/materials`).set(materialsData);
 
         const equipmentData = {};
         this.equipment.forEach(e => equipmentData[e.id] = e);
-        await this.db.ref('equipment').set(equipmentData);
+        await this.db.ref(`${basePath}/equipment`).set(equipmentData);
 
         const tipsData = {};
         this.tips.forEach(t => tipsData[t.id] = t);
-        await this.db.ref('tips').set(tipsData);
+        await this.db.ref(`${basePath}/tips`).set(tipsData);
     }
 
     showConfigModal() {
