@@ -11,6 +11,7 @@
     <script src="https://unpkg.com/html5-qrcode"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <div class="glass-background"></div>
@@ -90,9 +91,13 @@
         <section id="technicians-view" class="app-view">
             <div class="header-sub">
                 <h2>Control de Puntas</h2>
-                <button id="add-tip-btn" class="btn-primary-small">+ Asignar</button>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button id="import-prices-trigger" class="btn-primary-small" style="background: var(--accent-orange);" title="Lista de Precios">💰 Precios</button>
+                    <button id="add-tip-btn" class="btn-primary-small">+ Asignar</button>
+                </div>
             </div>
             <div id="tips-list" class="inventory-grid"></div>
+            <input type="file" id="price-list-input" accept=".xlsx, .xls, .csv" style="display: none;">
         </section>
 
         <!-- Modals and Forms -->
@@ -178,6 +183,14 @@
                 <div class="input-group">
                     <label>Tipo de Punta</label>
                     <input type="text" id="tip-type" placeholder="Ej: JBC C245-939">
+                </div>
+                <div class="input-group">
+                    <label>Código de Material (Opcional)</label>
+                    <input type="text" id="tip-mat-code" placeholder="Ingrese código para buscar costo">
+                </div>
+                <div class="input-group">
+                    <label>Costo Unitario ($)</label>
+                    <input type="text" id="tip-unit-cost" placeholder="0.00" readonly style="background: #f1f5f9; cursor: not-allowed;">
                 </div>
                 <div class="input-group">
                     <label>Imagen de Referencia</label>
@@ -310,6 +323,38 @@
             <div class="modal-actions">
                 <button id="save-config-btn" class="btn-primary">Guardar Coalescencia</button>
                 <button id="close-config-btn" class="btn-secondary">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Lista de Precios -->
+    <div id="prices-modal" class="modal">
+        <div class="modal-content glass">
+            <h3>💰 Maestro de Precios</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Sube un archivo Excel (.xlsx) o CSV con columnas <strong>"Material"</strong> y <strong>"Unit Cost"</strong>.
+            </p>
+            <div id="prices-summary" class="stats-card" style="margin-bottom: 1.5rem; margin-top: 0;">
+                <div class="stat-item">
+                    <span id="total-prices">0</span>
+                    <label>Registros</label>
+                </div>
+            </div>
+
+            <div class="input-group" style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 1rem; background: rgba(0,0,0,0.02);">
+                <label>🔍 Consultar Precio Rápido</label>
+                <input type="text" id="quick-price-search" placeholder="Escribe código de material...">
+                <div id="quick-price-result" style="margin-top: 1rem; font-size: 1.2rem; text-align: center; font-weight: 800; min-height: 1.5rem;">
+                    <!-- Result shows here -->
+                </div>
+            </div>
+
+            <div class="modal-actions" style="margin-top: 1.5rem;">
+                <button id="upload-prices-btn" class="btn-primary">Subir Excel/CSV</button>
+                <button id="clear-prices-btn" class="btn-secondary" style="background: var(--accent-red); color: white;">Limpiar Todo</button>
+            </div>
+            <div class="modal-actions" style="margin-top: 1rem;">
+                <button id="close-prices-btn" class="btn-secondary" style="width: 100%;">Cerrar</button>
             </div>
         </div>
     </div>

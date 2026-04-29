@@ -40,6 +40,7 @@ class PCBAMaterialManager {
         this.materials = [];
         this.equipment = [];
         this.tips = [];
+        this.priceList = {}; // { materialCode: unitCost }
         
         this.currentPart = null;
         this.db = null;
@@ -84,6 +85,7 @@ class PCBAMaterialManager {
         this.materials = (await idbGet('iliana_inventory')) || [];
         this.equipment = (await idbGet('iliana_equipment')) || [];
         this.tips = (await idbGet('iliana_tips')) || [];
+        this.priceList = (await idbGet('iliana_prices')) || {};
     }
 
     init() {
@@ -209,6 +211,18 @@ class PCBAMaterialManager {
         if (this.imageInput) this.imageInput.addEventListener('change', (e) => this.handleImage(e, 'currentMaterialImage', 'image-preview'));
         document.getElementById('eq-image-input')?.addEventListener('change', (e) => this.handleImage(e, 'currentEquipmentImage', 'eq-image-preview'));
         document.getElementById('tip-image-input')?.addEventListener('change', (e) => this.handleImage(e, 'currentTipImage', 'tip-image-preview'));
+
+        // Price List Listeners
+        document.getElementById('import-prices-trigger')?.addEventListener('click', () => {
+            this.showModal('prices-modal');
+            this.updatePriceSummary();
+        });
+        document.getElementById('upload-prices-btn')?.addEventListener('click', () => document.getElementById('price-list-input').click());
+        document.getElementById('price-list-input')?.addEventListener('change', (e) => this.handlePriceImport(e));
+        document.getElementById('clear-prices-btn')?.addEventListener('click', () => this.clearPrices());
+        document.getElementById('close-prices-btn')?.addEventListener('click', () => this.hideModal('prices-modal'));
+        document.getElementById('tip-mat-code')?.addEventListener('input', () => this.lookupPrice());
+        document.getElementById('quick-price-search')?.addEventListener('input', () => this.quickPriceSearch());
     }
 
     initFirebase() {
@@ -308,6 +322,12 @@ class PCBAMaterialManager {
                 if (this.currentView === 'technicians') this.render();
             }
         });
+
+        // Sync Prices
+        this.db.ref(`${basePath}/prices`).on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) this.priceList = data;
+        });
     }
 
     async uploadToFirebase() {
@@ -326,6 +346,10 @@ class PCBAMaterialManager {
         const tipsData = {};
         this.tips.forEach(t => tipsData[t.id] = t);
         await this.db.ref(`${basePath}/tips`).set(tipsData);
+
+        if (Object.keys(this.priceList).length > 0) {
+            await this.db.ref(`${basePath}/prices`).set(this.priceList);
+        }
     }
 
     showConfigModal() {
@@ -564,6 +588,119 @@ class PCBAMaterialManager {
         link.click();
     }
 
+
+    handlePriceImport(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const data = event.target.result;
+            let workbook;
+            
+            if (file.name.endsWith('.csv')) {
+                const text = new TextDecoder().decode(data);
+                workbook = XLSX.read(text, { type: 'string' });
+            } else {
+                workbook = XLSX.read(data, { type: 'binary' });
+            }
+
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet);
+
+            if (rows.length === 0) {
+                alert("El archivo está vacío.");
+                return;
+            }
+
+            // Find columns (case-insensitive)
+            const headers = Object.keys(rows[0]);
+            const matKey = headers.find(h => h.toLowerCase().includes('material') || h.toLowerCase().includes('code') || h.toLowerCase().includes('part'));
+            const costKey = headers.find(h => h.toLowerCase().includes('cost') || h.toLowerCase().includes('precio') || h.toLowerCase().includes('price'));
+
+            if (!matKey || !costKey) {
+                alert("No se encontraron las columnas 'Material' y 'Unit Cost'.");
+                return;
+            }
+
+            rows.forEach(row => {
+                const code = String(row[matKey]).trim().toUpperCase();
+                const cost = parseFloat(row[costKey]) || 0;
+                if (code) this.priceList[code] = cost;
+            });
+
+            this.save();
+            this.updatePriceSummary();
+            alert(`¡Importados ${Object.keys(this.priceList).length} precios exitosamente!`);
+            e.target.value = '';
+        };
+
+        if (file.name.endsWith('.csv')) {
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.readAsBinaryString(file);
+        }
+    }
+
+    updatePriceSummary() {
+        const count = Object.keys(this.priceList).length;
+        const totalEl = document.getElementById('total-prices');
+        if (totalEl) totalEl.textContent = count;
+    }
+
+    async clearPrices() {
+        if (confirm("¿Estás seguro de borrar todos los precios cargados?")) {
+            this.priceList = {};
+            await this.save();
+            this.updatePriceSummary();
+        }
+    }
+
+    lookupPrice() {
+        const code = document.getElementById('tip-mat-code').value.trim().toUpperCase();
+        const costInput = document.getElementById('tip-unit-cost');
+        if (this.priceList[code] !== undefined) {
+            costInput.value = this.priceList[code].toFixed(4);
+            costInput.style.color = 'var(--accent-green)';
+            costInput.style.fontWeight = 'bold';
+        } else {
+            costInput.value = '0.00';
+            costInput.style.color = 'var(--text-muted)';
+            costInput.style.fontWeight = 'normal';
+        }
+    }
+
+    quickPriceSearch() {
+        const query = document.getElementById('quick-price-search').value.trim().toUpperCase();
+        const resultEl = document.getElementById('quick-price-result');
+        if (!query) {
+            resultEl.innerHTML = '';
+            return;
+        }
+
+        const cost = this.priceList[query];
+        if (cost !== undefined) {
+            resultEl.innerHTML = `
+                <span style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-bottom: 0.2rem;">Costo Encontrado:</span>
+                <span style="color: var(--accent-green); font-size: 1.8rem;">$${cost.toFixed(4)}</span>
+            `;
+        } else {
+            // Partial search if exact match not found
+            const matches = Object.keys(this.priceList).filter(k => k.includes(query)).slice(0, 3);
+            if (matches.length > 0) {
+                resultEl.innerHTML = `
+                    <span style="color: var(--accent-orange); font-size: 0.9rem;">No exacto. Sugerencias:</span>
+                    <div style="font-size: 0.85rem; margin-top: 0.5rem;">
+                        ${matches.map(m => `<div style="margin-bottom: 0.2rem;">${m}: $${this.priceList[m].toFixed(4)}</div>`).join('')}
+                    </div>
+                `;
+            } else {
+                resultEl.innerHTML = `<span style="color: var(--accent-red); font-size: 0.9rem;">No encontrado</span>`;
+            }
+        }
+    }
+
     importFromJSON(file) {
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -778,6 +915,7 @@ class PCBAMaterialManager {
             await idbSet('iliana_inventory', this.materials);
             await idbSet('iliana_equipment', this.equipment);
             await idbSet('iliana_tips', this.tips);
+            await idbSet('iliana_prices', this.priceList);
         } catch (e) {
             console.error("Storage full or IDB error! Cannot save changes.", e);
         }
@@ -902,6 +1040,7 @@ class PCBAMaterialManager {
                     <div class="material-info">
                         <h3>${t.technician}</h3>
                         <p>Punta: ${t.type}</p>
+                        ${t.matCode ? `<small>Material: <strong>${t.matCode}</strong> ($${t.unitCost})</small><br>` : ''}
                         <small>Frecuencia: <strong>${freqText}</strong></small>
                         ${t.enteredBy ? `<p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem;">👤 ${t.enteredBy}</p>` : ''}
                     </div>
@@ -944,12 +1083,17 @@ class PCBAMaterialManager {
     addTip() {
         const technician = document.getElementById('tip-tech').value.trim();
         const type = document.getElementById('tip-type').value.trim();
+        const matCode = document.getElementById('tip-mat-code').value.trim().toUpperCase();
+        const unitCost = parseFloat(document.getElementById('tip-unit-cost').value) || 0;
         const enteredBy = document.getElementById('tip-entered-by').value.trim();
+        
         if (!technician || !type) return;
         this.tips.push({ 
             id: Date.now(), 
             technician, 
             type, 
+            matCode,
+            unitCost,
             enteredBy,
             date: new Date().toISOString(), 
             image: this.currentTipImage || '', 
@@ -958,6 +1102,8 @@ class PCBAMaterialManager {
         this.save(); this.render(); this.hideModal('tip-modal');
         document.getElementById('tip-tech').value = ''; 
         document.getElementById('tip-type').value = '';
+        document.getElementById('tip-mat-code').value = '';
+        document.getElementById('tip-unit-cost').value = '0.00';
         document.getElementById('tip-entered-by').value = '';
         document.getElementById('tip-image-preview').style.backgroundImage = '';
         this.currentTipImage = '';
