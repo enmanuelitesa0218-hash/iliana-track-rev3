@@ -326,7 +326,16 @@ class PCBAMaterialManager {
         // Sync Prices
         this.db.ref(`${basePath}/prices`).on('value', (snapshot) => {
             const data = snapshot.val();
-            if (data) this.priceList = data;
+            if (data) {
+                // Desanitizar si es necesario (aunque para el buscador rápido funciona igual si buscamos con la misma sanitización)
+                // Pero lo mejor es guardarlos tal cual y sanitizar solo para Firebase
+                this.priceList = {};
+                for (const key in data) {
+                    const originalKey = key.replace(/_DOT_/g, '.').replace(/_HASH_/g, '#').replace(/_DOLLAR_/g, '$').replace(/_OPEN_/g, '[').replace(/_CLOSE_/g, ']').replace(/_SLASH_/g, '/');
+                    this.priceList[originalKey] = data[key];
+                }
+                this.updatePriceSummary();
+            }
         });
     }
 
@@ -348,7 +357,17 @@ class PCBAMaterialManager {
         await this.db.ref(`${basePath}/tips`).set(tipsData);
 
         if (Object.keys(this.priceList).length > 0) {
-            await this.db.ref(`${basePath}/prices`).set(this.priceList);
+            const sanitizedPrices = {};
+            for (const key in this.priceList) {
+                const safeKey = key.replace(/\./g, '_DOT_')
+                                   .replace(/#/g, '_HASH_')
+                                   .replace(/\$/g, '_DOLLAR_')
+                                   .replace(/\[/g, '_OPEN_')
+                                   .replace(/\]/g, '_CLOSE_')
+                                   .replace(/\//g, '_SLASH_');
+                sanitizedPrices[safeKey] = this.priceList[key];
+            }
+            await this.db.ref(`${basePath}/prices`).set(sanitizedPrices);
         }
     }
 
@@ -595,52 +614,63 @@ class PCBAMaterialManager {
 
         const reader = new FileReader();
         reader.onload = (event) => {
-            const data = event.target.result;
-            let workbook;
-            
-            if (file.name.endsWith('.csv')) {
-                const text = new TextDecoder().decode(data);
-                workbook = XLSX.read(text, { type: 'string' });
-            } else {
-                workbook = XLSX.read(data, { type: 'binary' });
+            try {
+                const data = new Uint8Array(event.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                const sheetName = workbook.SheetNames[0];
+                const sheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(sheet);
+
+                if (rows.length === 0) {
+                    alert("El archivo está vacío o no tiene el formato correcto.");
+                    return;
+                }
+
+                // Enhanced column detection
+                const headers = Object.keys(rows[0]);
+                console.log("Headers detectados:", headers);
+
+                const matKey = headers.find(h => {
+                    const low = h.toLowerCase();
+                    return low.includes('material') || low.includes('code') || low.includes('part') || low.includes('código') || low.includes('pn') || low.includes('item');
+                });
+                
+                const costKey = headers.find(h => {
+                    const low = h.toLowerCase();
+                    return low.includes('cost') || low.includes('precio') || low.includes('price') || low.includes('unit') || low.includes('valor');
+                });
+
+                if (!matKey || !costKey) {
+                    const headerList = headers.join(', ');
+                    alert(`No se detectaron las columnas necesarias.\n\nBuscamos algo como "Material" y "Unit Cost".\n\nColumnas encontradas en tu archivo: ${headerList}`);
+                    return;
+                }
+
+                let importedCount = 0;
+                rows.forEach(row => {
+                    const code = String(row[matKey] || '').trim().toUpperCase();
+                    let costRaw = String(row[costKey] || '').replace(/[^0-9.]/g, '');
+                    const cost = parseFloat(costRaw) || 0;
+                    
+                    if (code) {
+                        this.priceList[code] = cost;
+                        importedCount++;
+                    }
+                });
+
+                this.save();
+                this.updatePriceSummary();
+                alert(`¡Éxito! Se importaron/actualizaron ${importedCount} registros de precios.`);
+            } catch (err) {
+                console.error("Error detallado de importación:", err);
+                alert("Error al procesar el archivo Excel. Asegúrate de que no esté protegido con contraseña.");
             }
-
-            const sheetName = workbook.SheetNames[0];
-            const sheet = workbook.Sheets[sheetName];
-            const rows = XLSX.utils.sheet_to_json(sheet);
-
-            if (rows.length === 0) {
-                alert("El archivo está vacío.");
-                return;
-            }
-
-            // Find columns (case-insensitive)
-            const headers = Object.keys(rows[0]);
-            const matKey = headers.find(h => h.toLowerCase().includes('material') || h.toLowerCase().includes('code') || h.toLowerCase().includes('part'));
-            const costKey = headers.find(h => h.toLowerCase().includes('cost') || h.toLowerCase().includes('precio') || h.toLowerCase().includes('price'));
-
-            if (!matKey || !costKey) {
-                alert("No se encontraron las columnas 'Material' y 'Unit Cost'.");
-                return;
-            }
-
-            rows.forEach(row => {
-                const code = String(row[matKey]).trim().toUpperCase();
-                const cost = parseFloat(row[costKey]) || 0;
-                if (code) this.priceList[code] = cost;
-            });
-
-            this.save();
-            this.updatePriceSummary();
-            alert(`¡Importados ${Object.keys(this.priceList).length} precios exitosamente!`);
             e.target.value = '';
         };
 
-        if (file.name.endsWith('.csv')) {
-            reader.readAsArrayBuffer(file);
-        } else {
-            reader.readAsBinaryString(file);
-        }
+        reader.onerror = () => alert("Error al leer el archivo desde el dispositivo.");
+        reader.readAsArrayBuffer(file);
     }
 
     updatePriceSummary() {
