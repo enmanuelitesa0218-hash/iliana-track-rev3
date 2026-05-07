@@ -516,7 +516,7 @@ class PCBAMaterialManager {
             const isTips = getIdx('Tecnico') !== -1 || getIdx('Punta') !== -1;
 
             if (isInventory) {
-                const pnIdx = getIdx('Part Number'), descIdx = getIdx('Descripcion'), locIdx = getIdx('Ubicacion'), grnIdx = getIdx('GRN'), qtyIdx = getIdx('Cantidad');
+                const pnIdx = getIdx('Part Number'), descIdx = getIdx('Descripcion'), locIdx = getIdx('Ubicacion'), grnIdx = getIdx('GRN'), qtyIdx = getIdx('Cantidad'), expIdx = getIdx('Vencimiento');
                 for (let i = 1; i < lines.length; i++) {
                     const values = lines[i].split(delimiter).map(v => v.trim().replace(/"/g, ''));
                     if (!values[pnIdx]) continue;
@@ -528,6 +528,7 @@ class PCBAMaterialManager {
                     } else {
                         this.materials.push({
                             partNumber: pn, description: values[descIdx] || '', location: values[locIdx] || '', grn: values[grnIdx] || '',
+                            expiryDate: values[expIdx] || '',
                             quantity: parseInt(values[qtyIdx]) || 0, image: '', lastUpdated: new Date().toISOString(),
                             logs: [{ type: 'IMPORT', delta: parseInt(values[qtyIdx]) || 0, date: new Date().toISOString() }]
                         });
@@ -800,6 +801,7 @@ class PCBAMaterialManager {
         document.getElementById('description').value = editPart ? editPart.description : '';
         document.getElementById('location').value = editPart ? editPart.location : '';
         document.getElementById('grn').value = editPart ? editPart.grn : '';
+        document.getElementById('expiry-date').value = editPart ? (editPart.expiryDate || '') : '';
         document.getElementById('quantity').value = editPart ? editPart.quantity : '0';
         document.getElementById('quantity').disabled = this.isEditing; 
         document.getElementById('entered-by').value = editPart ? (editPart.enteredBy || '') : '';
@@ -866,6 +868,7 @@ class PCBAMaterialManager {
         const description = document.getElementById('description').value.trim();
         const location = document.getElementById('location').value;
         const grn = document.getElementById('grn').value.trim();
+        const expiryDate = document.getElementById('expiry-date').value;
         const initialQty = parseInt(document.getElementById('quantity').value) || 0;
         const enteredBy = document.getElementById('entered-by').value.trim();
 
@@ -877,13 +880,15 @@ class PCBAMaterialManager {
             existing.description = description;
             existing.location = location;
             existing.grn = grn;
+            existing.expiryDate = expiryDate;
             existing.enteredBy = enteredBy;
             existing.image = this.currentMaterialImage || existing.image;
         } else if (existing) {
             existing.description = description;
             existing.location = location;
             existing.grn = grn;
-            if (enteredBy && !existing.enteredBy) existing.enteredBy = enteredBy; // Only update if empty to preserve history, or just overwrite it? Better overwrite to track who last registered:
+            existing.expiryDate = expiryDate;
+            if (enteredBy && !existing.enteredBy) existing.enteredBy = enteredBy; 
             existing.enteredBy = enteredBy; 
             existing.image = this.currentMaterialImage || existing.image;
             
@@ -901,6 +906,7 @@ class PCBAMaterialManager {
                 description,
                 location,
                 grn,
+                expiryDate,
                 enteredBy,
                 image: this.currentMaterialImage || '',
                 quantity: initialQty,
@@ -975,6 +981,10 @@ class PCBAMaterialManager {
 
         this.inventoryList.innerHTML = '';
         let lowStockCount = 0;
+        let expiringSoonCount = 0;
+        const now = new Date();
+        const fifteenDaysLater = new Date();
+        fifteenDaysLater.setDate(now.getDate() + 15);
 
         if (filtered.length === 0) {
             this.inventoryList.innerHTML = `
@@ -989,8 +999,22 @@ class PCBAMaterialManager {
             const isLow = m.quantity < 5;
             if (isLow) lowStockCount++;
 
+            let expiryStatus = ''; // 'expired', 'warning', or ''
+            let expiryLabel = '';
+            if (m.expiryDate) {
+                const exp = new Date(m.expiryDate);
+                if (exp < now) {
+                    expiryStatus = 'expired';
+                    expiryLabel = 'VENCIDO';
+                } else if (exp <= fifteenDaysLater) {
+                    expiryStatus = 'warning';
+                    expiryLabel = 'Próximo a Vencer';
+                    expiringSoonCount++;
+                }
+            }
+
             const card = document.createElement('div');
-            card.className = 'material-card';
+            card.className = `material-card ${expiryStatus}`;
             card.innerHTML = `
                 <div style="display: flex; align-items: center;">
                     ${m.image ? `<div class="material-img" style="background-image: url(${m.image})"></div>` : ''}
@@ -999,12 +1023,14 @@ class PCBAMaterialManager {
                         <p>${m.description}</p>
                         <span class="location-badge">${m.location || 'Bin'}</span>
                         ${m.grn ? `<span class="location-badge" style="background: #fdf2f2; color: #991b1b;">GRN: ${m.grn}</span>` : ''}
+                        ${m.expiryDate ? `<span class="location-badge ${expiryStatus}" style="background: ${expiryStatus === 'expired' ? '#ef4444' : expiryStatus === 'warning' ? '#f59e0b' : '#f1f5f9'}; color: white;">📅 ${new Date(m.expiryDate).toLocaleDateString()}</span>` : ''}
                         ${m.enteredBy ? `<p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem;">👤 ${m.enteredBy}</p>` : ''}
                     </div>
                 </div>
                 <div class="material-stock">
                     <span class="qty-badge">${m.quantity}</span>
                     <span class="status-label ${isLow ? 'low' : 'ok'}">${isLow ? 'Stock Bajo' : 'Disponible'}</span>
+                    ${expiryLabel ? `<span class="status-label ${expiryStatus}">${expiryLabel}</span>` : ''}
                 </div>
             `;
             card.addEventListener('click', () => this.showLogModal(m.partNumber));
@@ -1013,6 +1039,7 @@ class PCBAMaterialManager {
 
         document.getElementById('total-parts').textContent = this.materials.length;
         document.getElementById('low-stock-count').textContent = lowStockCount;
+        document.getElementById('expiring-soon-count').textContent = expiringSoonCount;
     }
 
     renderEquipment() {
@@ -1242,7 +1269,7 @@ class PCBAMaterialManager {
         };
 
         this.materials.forEach(m => {
-            const row = { p: m.partNumber, q: m.quantity, d: m.description, l: m.location, g: m.grn, u: m.enteredBy };
+            const row = { p: m.partNumber, q: m.quantity, d: m.description, l: m.location, g: m.grn, u: m.enteredBy, v: m.expiryDate };
             const len = JSON.stringify(row).length + 3;
             tryPushChunk(len);
             currentChunk.i.push(row);
@@ -1364,6 +1391,7 @@ class PCBAMaterialManager {
                             description: m.d || '', 
                             location: m.l || '',
                             grn: m.g || '',
+                            expiryDate: m.v || '',
                             enteredBy: m.u || '',
                             quantity: m.q || 0, 
                             image: '',

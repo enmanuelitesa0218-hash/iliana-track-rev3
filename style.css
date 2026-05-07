@@ -108,6 +108,43 @@ body {
     border: none;
 }
 
+/* Status Badge */
+.status-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--card-bg);
+    border: 1px solid var(--glass-border);
+    padding: 0.3rem 0.6rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #94a3b8;
+}
+
+.status-badge.online .status-dot {
+    background: var(--accent-green);
+    box-shadow: 0 0 5px var(--accent-green);
+}
+
+.status-badge.offline .status-dot {
+    background: var(--accent-red);
+}
+
+.status-badge.online .status-text {
+    color: var(--accent-green);
+}
+
+.status-badge.offline .status-text {
+    color: var(--accent-red);
+}
+
 .search-section {
     width: 100%;
 }
@@ -169,6 +206,24 @@ body {
 
 .material-card:active {
     transform: scale(0.98);
+}
+
+.material-card.expired {
+    border-left: 5px solid var(--accent-red);
+    background: #fff5f5;
+}
+
+body.dark-mode .material-card.expired {
+    background: #451a1a;
+}
+
+.material-card.warning {
+    border-left: 5px solid var(--accent-orange);
+    background: #fffcf0;
+}
+
+body.dark-mode .material-card.warning {
+    background: #45301a;
 }
 
 /* History List */
@@ -258,6 +313,8 @@ body {
 
 .status-label.low { color: var(--accent-red); }
 .status-label.ok { color: var(--accent-green); }
+.status-label.expired { color: var(--accent-red); font-weight: 800; }
+.status-label.warning { color: var(--accent-orange); }
 
 /* Stats Card */
 .stats-card {
